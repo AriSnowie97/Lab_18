@@ -1,9 +1,11 @@
 # ai_agent.py
+import asyncio
 import json
 import os
 import redis.asyncio as aioredis
 from google import genai
 from google.genai import types
+from google.genai import errors as genai_errors
 from weather_api import fetch_full_weather
 
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
@@ -137,16 +139,41 @@ async def process_message(user_id: str, user_text: str) -> str:
         history=history,
     )
 
-    try:
-        response = await chat.send_message(user_text)
-    except Exception as e:
-        err = str(e)
-        if "429" in err or "RESOURCE_EXHAUSTED" in err:
+    # Retry-логіка: до 3 спроб при 503/429
+    MAX_RETRIES = 3
+    last_exc: Exception | None = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = await chat.send_message(user_text)
+            last_exc = None
+            break  # успіх
+        except genai_errors.ServerError as e:
+            # 503 UNAVAILABLE — тимчасове перевантаження моделі
+            last_exc = e
+            if attempt < MAX_RETRIES:
+                wait = 2 ** attempt  # 2, 4 секунди
+                await asyncio.sleep(wait)
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                last_exc = e
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(5)
+            else:
+                raise
+
+    if last_exc is not None:
+        err = str(last_exc)
+        if "503" in err or "UNAVAILABLE" in err:
             raise RuntimeError(
-                "⚠️ Gemini API: перевищено ліміт запитів (429).\n"
-                "Зачекай кілька хвилин і спробуй знову, або зверни увагу на квоту ключа."
+                "⚠️ Gemini зараз перевантажений (503).\n"
+                "Я вже спробував кілька разів — спробуй ще раз за хвилину 🙏"
             )
-        raise
+        raise RuntimeError(
+            "⚠️ Gemini API: перевищено ліміт запитів (429).\n"
+            "Зачекай кілька хвилин і спробуй знову, або зверни увагу на квоту ключа."
+        )
 
     # Агентний цикл: Gemini може кілька разів викликати tools
     for _ in range(5):

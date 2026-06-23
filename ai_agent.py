@@ -124,6 +124,40 @@ async def _execute_tool(name: str, args: dict, user_id: str) -> str:
         return json.dumps(weather, ensure_ascii=False)
     return "Інструмент не знайдено."
 
+# ── Retry-хелпер для Gemini ──────────────────────────────────────────────────
+async def _send_with_retry(chat, payload, max_retries: int = 3):
+    """Надсилає повідомлення в чат з повторними спробами при 503/429."""
+    last_exc: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            return await chat.send_message(payload)
+        except genai_errors.ServerError as e:
+            last_exc = e
+            if attempt < max_retries:
+                await asyncio.sleep(2 ** attempt)  # 2, 4 сек
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                last_exc = e
+                if attempt < max_retries:
+                    await asyncio.sleep(5)
+            else:
+                raise
+
+    err = str(last_exc)
+    if "503" in err or "UNAVAILABLE" in err:
+        raise RuntimeError(
+            "😴 Ой, схоже ШІ зараз спить...\n"
+            "Я вже кілька разів його будив — не хоче прокидатись 🥱\n"
+            "Спробуй ще раз за хвилинку, він скоро прокинеться!"
+        )
+    raise RuntimeError(
+        "⚠️ Gemini API: перевищено ліміт запитів (429).\n"
+        "Зачекай кілька хвилин і спробуй знову, або зверни увагу на квоту ключа."
+    )
+
+
 # ── Головна функція агента ────────────────────────────────────────────────────
 async def process_message(user_id: str, user_text: str) -> str:
     """
@@ -139,42 +173,7 @@ async def process_message(user_id: str, user_text: str) -> str:
         history=history,
     )
 
-    # Retry-логіка: до 3 спроб при 503/429
-    MAX_RETRIES = 3
-    last_exc: Exception | None = None
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            response = await chat.send_message(user_text)
-            last_exc = None
-            break  # успіх
-        except genai_errors.ServerError as e:
-            # 503 UNAVAILABLE — тимчасове перевантаження моделі
-            last_exc = e
-            if attempt < MAX_RETRIES:
-                wait = 2 ** attempt  # 2, 4 секунди
-                await asyncio.sleep(wait)
-        except Exception as e:
-            err = str(e)
-            if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                last_exc = e
-                if attempt < MAX_RETRIES:
-                    await asyncio.sleep(5)
-            else:
-                raise
-
-    if last_exc is not None:
-        err = str(last_exc)
-        if "503" in err or "UNAVAILABLE" in err:
-            raise RuntimeError(
-                "😴 Ой, схоже ШІ зараз спить...\n"
-                "Я вже кілька разів його будив — не хоче прокидатись 🥱\n"
-                "Спробуй ще раз за хвилинку, він скоро прокинеться!"
-            )
-        raise RuntimeError(
-            "⚠️ Gemini API: перевищено ліміт запитів (429).\n"
-            "Зачекай кілька хвилин і спробуй знову, або зверни увагу на квоту ключа."
-        )
+    response = await _send_with_retry(chat, user_text)
 
     # Агентний цикл: Gemini може кілька разів викликати tools
     for _ in range(5):
@@ -201,7 +200,7 @@ async def process_message(user_id: str, user_text: str) -> str:
         if not has_tool_call:
             break
 
-        response = await chat.send_message(tool_responses)
+        response = await _send_with_retry(chat, tool_responses)
 
     try:
         final_text = response.text.strip() if response.text else "Вибач, не вдалось отримати відповідь 😔"

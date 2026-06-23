@@ -151,6 +151,9 @@ async def handle_text(message: types.Message):
 
     try:
         reply = await process_message(user_id, user_text)
+    except RuntimeError as e:
+        # Очікувані помилки (429 тощо) — показуємо юзеру
+        reply = str(e)
     except Exception as e:
         logger.error(f"AI agent error for user {user_id}: {type(e).__name__}: {e}")
         logger.error(traceback.format_exc())

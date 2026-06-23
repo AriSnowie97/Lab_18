@@ -137,7 +137,16 @@ async def process_message(user_id: str, user_text: str) -> str:
         history=history,
     )
 
-    response = await chat.send_message(user_text)
+    try:
+        response = await chat.send_message(user_text)
+    except Exception as e:
+        err = str(e)
+        if "429" in err or "RESOURCE_EXHAUSTED" in err:
+            raise RuntimeError(
+                "⚠️ Gemini API: перевищено ліміт запитів (429).\n"
+                "Зачекай кілька хвилин і спробуй знову, або зверни увагу на квоту ключа."
+            )
+        raise
 
     # Агентний цикл: Gemini може кілька разів викликати tools
     for _ in range(5):

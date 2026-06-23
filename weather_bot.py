@@ -140,26 +140,76 @@ async def cmd_reset(message: types.Message):
     await reset_chat(str(message.from_user.id))
     await message.reply("🔄 Контекст розмови скинуто. Починаємо з чистого аркуша!")
 
+
+async def _safe_edit(wait_msg, text: str, original_message):
+    """Редагує wait_msg з Markdown. Якщо Telegram відхилить — шле plain text."""
+    # 1) Спробуємо edit з Markdown
+    try:
+        await wait_msg.edit_text(text, parse_mode="Markdown")
+        return
+    except Exception as e:
+        if "can't parse entities" not in str(e) and "parse" not in str(e).lower():
+            # Повідомлення видалено або інша некритична помилка → fallback reply
+            try:
+                await original_message.reply(text, parse_mode="Markdown")
+                return
+            except Exception:
+                pass
+
+    # 2) Markdown зламаний — пробуємо edit без форматування
+    try:
+        await wait_msg.edit_text(text)
+        return
+    except Exception:
+        pass
+
+    # 3) Крайній fallback: звичайна відповідь без форматування
+    try:
+        await original_message.reply(text)
+    except Exception:
+        pass
+
+
 # ── Всі інші повідомлення → AI агент ─────────────────────────────────────────
 @dp.message()
 async def handle_text(message: types.Message):
     user_id = str(message.from_user.id)
     user_text = message.text.strip()
 
-    # Показуємо "печатає..."
-    await bot.send_chat_action(message.chat.id, "typing")
+    # Надсилаємо повідомлення-заглушку одразу — користувач бачить реакцію миттєво
+    wait_msg = await message.reply("✍️ Печатає...")
+
+    # Фонова задача: оновлює "typing" кожні 4 сек поки AI думає
+    # (Telegram скидає індикатор через ~5 сек, тому оновлюємо частіше)
+    stop_typing = asyncio.Event()
+
+    async def keep_typing():
+        while not stop_typing.is_set():
+            try:
+                await bot.send_chat_action(message.chat.id, "typing")
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(asyncio.shield(stop_typing.wait()), timeout=4)
+            except asyncio.TimeoutError:
+                pass
+
+    typing_task = asyncio.create_task(keep_typing())
 
     try:
         reply = await process_message(user_id, user_text)
     except RuntimeError as e:
-        # Очікувані помилки (429 тощо) — показуємо юзеру
         reply = str(e)
     except Exception as e:
         logger.error(f"AI agent error for user {user_id}: {type(e).__name__}: {e}")
         logger.error(traceback.format_exc())
         reply = f"😔 Помилка AI: `{type(e).__name__}`. Перевір Railway Logs."
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
 
-    await message.reply(reply, parse_mode="Markdown")
+    # Замінюємо заглушку реальною відповіддю (без зайвого повідомлення)
+    await _safe_edit(wait_msg, reply, message)
 
 # ── Запуск ────────────────────────────────────────────────────────────────────
 async def main():

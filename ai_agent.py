@@ -132,7 +132,7 @@ async def process_message(user_id: str, user_text: str) -> str:
     history = await _load_history(user_id)
 
     chat = client.aio.chats.create(
-        model="gemini-2.5-flash",
+        model="gemini-3.5-flash",
         config=CHAT_CONFIG,
         history=history,
     )

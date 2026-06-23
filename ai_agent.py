@@ -167,8 +167,9 @@ async def process_message(user_id: str, user_text: str) -> str:
         err = str(last_exc)
         if "503" in err or "UNAVAILABLE" in err:
             raise RuntimeError(
-                "⚠️ Gemini зараз перевантажений (503).\n"
-                "Я вже спробував кілька разів — спробуй ще раз за хвилину 🙏"
+                "😴 Ой, схоже ШІ зараз спить...\n"
+                "Я вже кілька разів його будив — не хоче прокидатись 🥱\n"
+                "Спробуй ще раз за хвилинку, він скоро прокинеться!"
             )
         raise RuntimeError(
             "⚠️ Gemini API: перевищено ліміт запитів (429).\n"

@@ -1,81 +1,40 @@
 # weather_bot.py
 import asyncio
+import logging
 import os
-import aiohttp
-import redis.asyncio as aioredis
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from dotenv import load_dotenv
 
+from ai_agent import process_message, reset_chat
+from weather_api import fetch_full_weather, format_weather_card
+from scheduler import setup_scheduler, subscribe_user, unsubscribe_user, get_subscription
+
 load_dotenv()
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
-# --- Redis клієнт ---
-redis: aioredis.Redis = None
-
-async def get_redis() -> aioredis.Redis:
-    global redis
-    if redis is None:
-        redis = aioredis.from_url(REDIS_URL, decode_responses=True)
-    return redis
-
-async def get_user_city(user_id: str) -> str | None:
-    r = await get_redis()
-    return await r.get(f"city:{user_id}")
-
-async def save_user_city(user_id: str, city: str):
-    r = await get_redis()
-    await r.set(f"city:{user_id}", city)
-
-# --- Погода ---
-async def get_weather(city: str) -> dict:
-    url = (
-        f"http://api.openweathermap.org/data/2.5/weather"
-        f"?q={city}&appid={WEATHER_API_KEY}&units=metric&lang=uk"
-    )
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            return await resp.json()
-
-def get_wind_direction(degrees: float | None) -> str:
-    if degrees is None:
-        return "не визначено"
-    directions = ["Пн", "Пн-Сх", "Сх", "Пд-Сх", "Пд", "Пд-Зх", "Зх", "Пн-Зх"]
-    return directions[round(degrees / 45) % 8]
-
-async def format_weather_data(data: dict) -> str:
-    if data.get("cod") != 200:
-        return "⚠️ Місто не знайдено. Перевірте правильність написання."
-    main = data["main"]
-    weather = data["weather"][0]
-    wind = data["wind"]
-    city = data["name"]
-    country = data["sys"]["country"]
-
-    return (
-        f"📍 *Погода в місті {city}, {country}*\n\n"
-        f"🌡️ Температура: {main['temp']} °C (відчувається як {main['feels_like']} °C)\n"
-        f"☁️ Опис: {weather['description'].capitalize()}\n"
-        f"💧 Вологість: {main['humidity']} %\n"
-        f"💨 Вітер: {wind['speed']} м/с, напрямок: {get_wind_direction(wind.get('deg'))}\n"
-        f"🔽 Тиск: {main['pressure']} hPa"
-    )
-
-# --- Ініціалізація бота ---
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# --- Команди ---
+# ── /start ────────────────────────────────────────────────────────────────────
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.reply(
-        "👋 Привіт! Я бот, який покаже вам актуальну погоду ☀️☁️🌧️.\n"
-        "Введіть назву міста або скористайтесь командою /weather <місто>"
+        "👋 Привіт! Я *WeatherBot* — твій AI-асистент з погоди 🌤️\n\n"
+        "Просто напиши мені будь-що про погоду, наприклад:\n"
+        "• *яка погода в Києві?*\n"
+        "• *чи варто брати парасольку?*\n"
+        "• *який УФ-індекс у Львові?*\n\n"
+        "Або використовуй команди — /help",
+        parse_mode="Markdown"
     )
 
+# ── /help ─────────────────────────────────────────────────────────────────────
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     await message.reply(
@@ -83,59 +42,127 @@ async def cmd_help(message: types.Message):
         "✅ /start – Запуск бота\n"
         "ℹ️ /info – Про бота\n"
         "🌤️ /weather <місто> – Погода в конкретному місті\n"
-        "📍 /last\\_city – Ваше останнє запитане місто\n"
-        "🛑 /exit – Завершити діалог\n\n"
-        "✍️ Просто надішліть назву міста, щоб дізнатися погоду!",
+        "📍 /last\\_city – Твоє останнє запитане місто\n"
+        "🗓️ /daily <HH:MM> – Щоденне зведення о вказаному часі\n"
+        "🚫 /daily off – Скасувати щоденне зведення\n"
+        "🔄 /reset – Скинути контекст розмови з AI\n\n"
+        "✍️ Або просто напиши запитання про погоду — AI все розуміє!",
         parse_mode="Markdown"
     )
 
+# ── /info ─────────────────────────────────────────────────────────────────────
 @dp.message(Command("info"))
 async def cmd_info(message: types.Message):
     await message.reply(
-        "🤖 *Цей бот показує поточну погоду.*\n"
-        "📡 Дані надає OpenWeatherMap\n"
-        "💻 Python + aiogram + Redis\n"
+        "🤖 *WeatherBot з AI-агентом*\n\n"
+        "📡 Погодні дані: OpenWeatherMap\n"
+        "🧠 AI: Google Gemini 2.0 Flash\n"
+        "💾 Пам'ять: Redis\n"
+        "💻 Python + aiogram 3\n"
         "🚀 Хостинг: Railway",
         parse_mode="Markdown"
     )
 
-@dp.message(Command("last_city"))
-async def cmd_last_city(message: types.Message):
-    user_id = str(message.from_user.id)
-    city = await get_user_city(user_id)
-    if city:
-        await message.reply(f"📍 Ваше останнє місто: *{city}*", parse_mode="Markdown")
-    else:
-        await message.reply("❌ Ви ще не шукали погоду для жодного міста.")
-
-@dp.message(Command("exit"))
-async def cmd_exit(message: types.Message):
-    await message.reply("👋 До зустрічі! Бот працює постійно ☁️.")
-
+# ── /weather <місто> ──────────────────────────────────────────────────────────
 @dp.message(Command("weather"))
 async def cmd_weather(message: types.Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("🌇 Введіть місто після команди: /weather <місто>")
+        await message.reply("🌇 Введіть місто: /weather <місто>")
         return
+
     city = args[1]
-    data = await get_weather(city)
-    text = await format_weather_data(data)
-    await message.reply(text, parse_mode="Markdown")
-    await save_user_city(str(message.from_user.id), city)
+    wait_msg = await message.reply("⏳ Отримую дані...")
+    api_key = os.getenv("WEATHER_API_KEY")
+    weather = await fetch_full_weather(city, api_key)
 
-# --- Повідомлення без команди: просто місто ---
+    if "error" in weather:
+        await wait_msg.edit_text(f"⚠️ {weather['error']}")
+        return
+
+    text = format_weather_card(weather)
+    await wait_msg.edit_text(text, parse_mode="Markdown")
+
+# ── /last_city ────────────────────────────────────────────────────────────────
+@dp.message(Command("last_city"))
+async def cmd_last_city(message: types.Message):
+    import redis.asyncio as aioredis
+    r = aioredis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"), decode_responses=True)
+    city = await r.get(f"city:{message.from_user.id}")
+    if city:
+        await message.reply(f"📍 Твоє останнє місто: *{city}*", parse_mode="Markdown")
+    else:
+        await message.reply("❌ Ти ще не шукав погоду для жодного міста.")
+
+# ── /daily ────────────────────────────────────────────────────────────────────
+@dp.message(Command("daily"))
+async def cmd_daily(message: types.Message):
+    args = message.text.split(maxsplit=1)
+    user_id = str(message.from_user.id)
+
+    if len(args) < 2:
+        sub = await get_subscription(user_id)
+        if sub:
+            await message.reply(
+                f"🗓️ Ти підписаний на щоденне зведення о *{sub['hour']:02d}:{sub['minute']:02d}*\n"
+                f"Щоб скасувати: /daily off",
+                parse_mode="Markdown"
+            )
+        else:
+            await message.reply(
+                "🗓️ Щоб підписатись на щоденне зведення погоди:\n"
+                "`/daily 08:00`",
+                parse_mode="Markdown"
+            )
+        return
+
+    arg = args[1].strip()
+
+    if arg.lower() == "off":
+        await unsubscribe_user(user_id)
+        await message.reply("🚫 Щоденне зведення скасовано.")
+        return
+
+    ok = await subscribe_user(user_id, arg)
+    if ok:
+        await message.reply(
+            f"✅ Щоденне зведення погоди налаштовано на *{arg}*!\n"
+            f"Переконайся що у мене є збережене місто — надішли назву міста або /weather <місто>",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.reply("⚠️ Невірний формат часу. Використовуй: `/daily 08:30`", parse_mode="Markdown")
+
+# ── /reset ────────────────────────────────────────────────────────────────────
+@dp.message(Command("reset"))
+async def cmd_reset(message: types.Message):
+    await reset_chat(str(message.from_user.id))
+    await message.reply("🔄 Контекст розмови скинуто. Починаємо з чистого аркуша!")
+
+# ── Всі інші повідомлення → AI агент ─────────────────────────────────────────
 @dp.message()
-async def text_weather(message: types.Message):
-    city = message.text.strip()
-    data = await get_weather(city)
-    text = await format_weather_data(data)
-    await message.reply(text, parse_mode="Markdown")
-    await save_user_city(str(message.from_user.id), city)
+async def handle_text(message: types.Message):
+    user_id = str(message.from_user.id)
+    user_text = message.text.strip()
 
-# --- Запуск ---
+    # Показуємо "печатає..."
+    await bot.send_chat_action(message.chat.id, "typing")
+
+    try:
+        reply = await process_message(user_id, user_text)
+    except Exception as e:
+        logger.error(f"AI agent error for user {user_id}: {e}")
+        reply = "😔 Вибач, сталась помилка. Спробуй ще раз."
+
+    await message.reply(reply, parse_mode="Markdown")
+
+# ── Запуск ────────────────────────────────────────────────────────────────────
 async def main():
-    await dp.start_polling(bot)
+    scheduler = setup_scheduler(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        scheduler.shutdown()
 
 if __name__ == "__main__":
     asyncio.run(main())

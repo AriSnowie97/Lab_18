@@ -166,7 +166,10 @@ async def process_message(user_id: str, user_text: str) -> str:
 
         response = await chat.send_message(tool_responses)
 
-    final_text = response.text.strip() if response.text else "Вибач, не вдалось отримати відповідь 😔"
+    try:
+        final_text = response.text.strip() if response.text else "Вибач, не вдалось отримати відповідь 😔"
+    except Exception:
+        final_text = "Вибач, не вдалось отримати відповідь 😔"
 
     # Зберігаємо оновлену історію
     await _save_history(user_id, list(chat.get_history()))

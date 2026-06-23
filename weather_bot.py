@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+import traceback
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -151,8 +152,9 @@ async def handle_text(message: types.Message):
     try:
         reply = await process_message(user_id, user_text)
     except Exception as e:
-        logger.error(f"AI agent error for user {user_id}: {e}")
-        reply = "😔 Вибач, сталась помилка. Спробуй ще раз."
+        logger.error(f"AI agent error for user {user_id}: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        reply = f"😔 Помилка AI: `{type(e).__name__}`. Перевір Railway Logs."
 
     await message.reply(reply, parse_mode="Markdown")
 

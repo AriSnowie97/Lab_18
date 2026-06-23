@@ -1,0 +1,30 @@
+# Секрети — НІКОЛИ не комітити!
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Середовище
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Дані (більше не потрібні, але на всяк випадок)
+user_cities.json
+
+# OS
+.DS_Store
+Thumbs.db

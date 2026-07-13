@@ -260,6 +260,21 @@ async def handle_text(message: types.Message):
 # ── Запуск ────────────────────────────────────────────────────────────────────
 async def main():
     scheduler = setup_scheduler(bot)
+
+    # Встановлюємо Menu Button (кнопка біля скрепки) якщо є MINIAPP_URL
+    miniapp_url = os.getenv("MINIAPP_URL", "")
+    if miniapp_url:
+        try:
+            await bot.set_chat_menu_button(
+                menu_button=types.MenuButtonWebApp(
+                    text="🌤️ WeatherApp",
+                    web_app=types.WebAppInfo(url=miniapp_url)
+                )
+            )
+            logger.info(f"Menu button set to {miniapp_url}")
+        except Exception as e:
+            logger.warning(f"Не вдалось встановити menu button: {e}")
+
     try:
         await dp.start_polling(bot)
     finally:

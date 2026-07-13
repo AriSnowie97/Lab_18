@@ -7,10 +7,24 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import asyncio
+from contextlib import asynccontextmanager
+
 from ai_agent import process_message, reset_chat
 from weather_api import fetch_full_weather, fetch_weather_by_coords, format_weather_card, get_forecast
 
-app = FastAPI(title="WeatherBot API")
+# Імпортуємо main бота, щоб запустити його разом з FastAPI
+import weather_bot
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Запускаємо бота в фоновому таску asyncio
+    bot_task = asyncio.create_task(weather_bot.main())
+    yield
+    # При вимкненні FastAPI таск бота буде скасовано автоматично
+    bot_task.cancel()
+
+app = FastAPI(title="WeatherBot API", lifespan=lifespan)
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 # Дозволяємо запити з GitHub Pages і Telegram (mini app завантажується з tg://)

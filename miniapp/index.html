@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <title>WeatherApp 🌤️</title>
+  <meta name="description" content="AI Weather Mini App — погода, звіти, AI-чат"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="style.css"/>
+  <!-- Telegram Web App SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header class="app-header">
+    <h1>🌤️ WeatherApp</h1>
+    <span class="header-time" id="header-time">--:--</span>
+  </header>
+
+  <!-- ── Tab Panels ──────────────────────────────────────────── -->
+  <div class="tabs-content">
+
+    <!-- Weather Tab -->
+    <section id="panel-weather" class="tab-panel active" role="tabpanel">
+
+      <div class="weather-search">
+        <input id="city-input" type="text" placeholder="Введіть місто..." autocomplete="off"/>
+        <button id="city-search-btn" title="Пошук">🔍</button>
+      </div>
+
+      <button id="gps-btn" class="gps-btn">
+        <span>📍</span> Визначити за GPS
+      </button>
+
+      <div id="weather-content">
+        <div class="spinner"></div>
+      </div>
+
+    </section>
+
+    <!-- Forecast Tab -->
+    <section id="panel-forecast" class="tab-panel" role="tabpanel">
+
+      <div class="forecast-header">
+        <h2>📅 Прогноз на 5 днів</h2>
+        <span id="forecast-city-label" class="forecast-city-lbl"></span>
+      </div>
+
+      <div id="forecast-content">
+        <div class="spinner"></div>
+      </div>
+
+    </section>
+
+    <!-- Chat Tab -->
+    <section id="panel-chat" class="tab-panel" role="tabpanel">
+
+      <div class="chat-messages" id="chat-messages">
+        <!-- messages injected by JS -->
+      </div>
+
+      <div class="chat-input-wrap">
+        <textarea
+          id="chat-input"
+          class="chat-input"
+          placeholder="Запитай про погоду..."
+          rows="1"
+        ></textarea>
+        <button class="chat-reset-btn" id="chat-reset-btn" title="Скинути чат">🗑</button>
+        <button class="chat-send" id="chat-send-btn" title="Надіслати">➤</button>
+      </div>
+
+    </section>
+
+  </div><!-- /tabs-content -->
+
+  <!-- ── Bottom Navigation ────────────────────────────────────── -->
+  <nav class="bottom-nav" role="navigation">
+    <button class="nav-btn active" data-tab="weather" id="nav-weather">
+      <span class="nav-icon">🌤️</span>
+      <span class="nav-label">Погода</span>
+    </button>
+    <button class="nav-btn" data-tab="forecast" id="nav-forecast">
+      <span class="nav-icon">📅</span>
+      <span class="nav-label">Прогноз</span>
+    </button>
+    <button class="nav-btn" data-tab="chat" id="nav-chat">
+      <span class="nav-icon">🤖</span>
+      <span class="nav-label">AI-чат</span>
+    </button>
+  </nav>
+
+</div><!-- /app -->
+
+<script src="app.js"></script>
+</body>
+</html>

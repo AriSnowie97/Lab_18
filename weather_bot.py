@@ -4,8 +4,9 @@ import logging
 import os
 import traceback
 
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
 
 from ai_agent import process_message, reset_chat
@@ -25,19 +26,34 @@ dp = Dispatcher()
 # ── /start ────────────────────────────────────────────────────────────────────
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
+    miniapp_url = os.getenv("MINIAPP_URL", "")
+    kb = None
+    if miniapp_url:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🌤️ Відкрити WeatherApp", web_app=types.WebAppInfo(url=miniapp_url))]
+        ])
     await message.reply(
         "👋 Привіт! Я *WeatherBot* — твій AI-асистент з погоди 🌤️\n\n"
         "Просто напиши мені будь-що про погоду, наприклад:\n"
         "• *яка погода в Києві?*\n"
         "• *чи варто брати парасольку?*\n"
         "• *який УФ-індекс у Львові?*\n\n"
+        "Або відкрий Mini App 👇 — GPS, звіти і AI-чат в одному місці!\n"
         "Або використовуй команди — /help",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=kb,
     )
+
 
 # ── /help ─────────────────────────────────────────────────────────────────────
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
+    miniapp_url = os.getenv("MINIAPP_URL", "")
+    kb = None
+    if miniapp_url:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🌤️ Відкрити WeatherApp", web_app=types.WebAppInfo(url=miniapp_url))]
+        ])
     await message.reply(
         "🧾 *Доступні команди:*\n\n"
         "✅ /start – Запуск бота\n"
@@ -47,9 +63,12 @@ async def cmd_help(message: types.Message):
         "🗓️ /daily <HH:MM> – Щоденне зведення о вказаному часі\n"
         "🚫 /daily off – Скасувати щоденне зведення\n"
         "🔄 /reset – Скинути контекст розмови з AI\n\n"
-        "✍️ Або просто напиши запитання про погоду — AI все розуміє!",
-        parse_mode="Markdown"
+        "✍️ Або просто напиши запитання про погоду — AI все розуміє!\n"
+        "📱 Або відкрий Mini App 👇 — GPS, звіти, AI-чат!",
+        parse_mode="Markdown",
+        reply_markup=kb,
     )
+
 
 # ── /info ─────────────────────────────────────────────────────────────────────
 @dp.message(Command("info"))
@@ -141,7 +160,34 @@ async def cmd_reset(message: types.Message):
     await message.reply("🔄 Контекст розмови скинуто. Починаємо з чистого аркуша!")
 
 
+# ── Геолокація від користувача ───────────────────────────────────────────────
+@dp.message(F.location)
+async def handle_location(message: types.Message):
+    """Зберігає GPS і повертає погоду для цього місця."""
+    import redis.asyncio as aioredis
+    from weather_api import fetch_weather_by_coords
+
+    lat = message.location.latitude
+    lon = message.location.longitude
+    user_id = str(message.from_user.id)
+
+    r = aioredis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"), decode_responses=True)
+    await r.set(f"gps:{user_id}", f"{lat},{lon}")
+
+    wait_msg = await message.reply("📍 Визначаю погоду за твоїм місцезнаходженням...")
+    api_key = os.getenv("WEATHER_API_KEY")
+    weather = await fetch_weather_by_coords(lat, lon, api_key)
+
+    if "error" in weather:
+        await wait_msg.edit_text(f"⚠️ {weather['error']}")
+        return
+
+    await r.set(f"city:{user_id}", weather["city"])
+    await wait_msg.edit_text(format_weather_card(weather), parse_mode="Markdown")
+
+
 async def _safe_edit(wait_msg, text: str, original_message):
+
     """Редагує wait_msg з Markdown. Якщо Telegram відхилить — шле plain text."""
     # 1) Спробуємо edit з Markdown
     try:

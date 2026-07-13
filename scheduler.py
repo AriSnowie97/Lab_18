@@ -1,5 +1,5 @@
-# scheduler.py
 import asyncio
+import json
 import logging
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -64,6 +64,25 @@ async def send_daily_weather(bot, user_id: str, hour: int, minute: int):
     if "error" in weather:
         return
 
+    # Зберігаємо звіт в Redis для Mini App (max 30 записів)
+    report = {
+        "timestamp": now.isoformat(),
+        "city": weather["city"],
+        "country": weather["country"],
+        "temp": weather["temp"],
+        "feels_like": weather["feels_like"],
+        "temp_min": weather["temp_min"],
+        "temp_max": weather["temp_max"],
+        "description": weather["description"],
+        "icon": weather.get("icon", "01d"),
+        "humidity": weather["humidity"],
+        "wind_speed": weather["wind_speed"],
+        "uv_description": weather["uv_description"],
+    }
+    history_key = f"daily_history:{user_id}"
+    await r.lpush(history_key, json.dumps(report, ensure_ascii=False))
+    await r.ltrim(history_key, 0, 29)  # зберігаємо тільки 30 останніх
+
     text = (
         f"🌅 *Доброго ранку! Ваше щоденне зведення погоди:*\n\n"
         + format_weather_card(weather)
@@ -72,6 +91,7 @@ async def send_daily_weather(bot, user_id: str, hour: int, minute: int):
         await bot.send_message(int(user_id), text, parse_mode="Markdown")
     except Exception as e:
         logger.warning(f"Не вдалось надіслати daily для {user_id}: {e}")
+
 
 async def daily_check_job(bot):
     """Перевіряє всіх підписаних користувачів і надсилає сповіщення."""

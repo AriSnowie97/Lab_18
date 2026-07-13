@@ -2,8 +2,8 @@
 'use strict';
 
 // ── Config ───────────────────────────────────────────────────────
-// API_BASE вычисляется автоматически: Mini App обслуживается тем же сервером
-const API_BASE = window.location.origin;
+// API на Railway, статика на GitHub Pages — разные домены, поэтому хардкодим
+const API_BASE = 'https://weathertgbot-production.up.railway.app';
 
 // ── Telegram WebApp init ─────────────────────────────────────────
 const tg = window.Telegram?.WebApp;

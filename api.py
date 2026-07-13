@@ -5,7 +5,6 @@ import os
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ai_agent import process_message, reset_chat
@@ -14,10 +13,19 @@ from weather_api import fetch_full_weather, fetch_weather_by_coords, format_weat
 app = FastAPI(title="WeatherBot API")
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# Дозволяємо запити з GitHub Pages і Telegram (mini app завантажується з tg://)
+ALLOWED_ORIGINS = [
+    "https://arisnowie97.github.io",
+    "https://web.telegram.org",
+    "null",   # деякі браузери шлють null для локальних файлів
+    *os.getenv("ALLOWED_ORIGINS", "").split(","),
+]
+ALLOWED_ORIGINS = [o for o in ALLOWED_ORIGINS if o]  # прибираємо порожні
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.github\.io",  # будь-який gh-pages домен
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -159,5 +167,5 @@ async def get_subscription(user_id: str):
         return {"subscribed": True, "hour": int(data["hour"]), "minute": int(data["minute"])}
     return {"subscribed": False}
 
-# ── Статика Mini App ──────────────────────────────────────────────────────────
-app.mount("/", StaticFiles(directory="miniapp", html=True), name="miniapp")
+# Статика тепер на GitHub Pages — цей рядок більше не потрібен
+# app.mount("/", StaticFiles(directory="miniapp", html=True), name="miniapp")

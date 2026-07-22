@@ -167,10 +167,11 @@ async def _send_with_retry(chat, payload, max_retries: int = 4):
             return response, chat
         except Exception as e:
             err = str(e)
-            if "429" in err or "RESOURCE_EXHAUSTED" in err or "503" in err or "UNAVAILABLE" in err:
+            if any(code in err for code in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "401", "403", "UNAUTHENTICATED", "PERMISSION_DENIED"]):
                 last_exc = e
                 current_key = getattr(chat, "_my_api_key", None)
                 if current_key:
+                    print(f"Key {current_key[:10]}... failed with {err[:50]}... Rotating!")
                     _key_manager.mark_exhausted(current_key)
                 
                 # Створюємо новий чат з новим ключем

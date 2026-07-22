@@ -14,10 +14,19 @@ WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 # ── Gemini клієнт (Ротація токенів) ──────────────────────────────────────────
 class KeyManager:
     def __init__(self):
-        keys_str = os.getenv("GEMINI_API_KEYS", os.getenv("GEMINI_API_KEY", ""))
-        self.keys = [k.replace('\n', '').replace('\r', '').replace(' ', '').replace('"', '').replace("'", '').strip() for k in keys_str.split(",") if k.strip()]
+        self.keys = []
+        for i in range(1, 11):
+            k = os.getenv(f"GEMINI_API_KEY_{i}")
+            if k:
+                self.keys.append(k.replace('\n', '').replace('\r', '').replace(' ', '').replace('"', '').replace("'", '').strip())
+                
         if not self.keys:
-            raise ValueError("GEMINI_API_KEYS or GEMINI_API_KEY is missing in .env")
+            single = os.getenv("GEMINI_API_KEY")
+            if single:
+                self.keys.append(single.replace('\n', '').replace('\r', '').replace(' ', '').replace('"', '').replace("'", '').strip())
+                
+        if not self.keys:
+            raise ValueError("GEMINI_API_KEY_1... or GEMINI_API_KEY is missing in .env")
         self.cooldowns = {k: 0.0 for k in self.keys}
         self.current_idx = 0
 

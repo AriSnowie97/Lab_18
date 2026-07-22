@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import time
 import redis.asyncio as aioredis
 from google import genai
 from google.genai import types
@@ -10,14 +11,36 @@ from weather_api import fetch_full_weather
 
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 
-# ── Gemini клієнт ─────────────────────────────────────────────────────────────
-_client: genai.Client | None = None
+# ── Gemini клієнт (Ротація токенів) ──────────────────────────────────────────
+class KeyManager:
+    def __init__(self):
+        keys_str = os.getenv("GEMINI_API_KEYS", os.getenv("GEMINI_API_KEY", ""))
+        self.keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+        if not self.keys:
+            raise ValueError("GEMINI_API_KEYS or GEMINI_API_KEY is missing in .env")
+        self.cooldowns = {k: 0.0 for k in self.keys}
+        self.current_idx = 0
 
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    return _client
+    def get_next_key(self) -> str:
+        now = time.time()
+        for _ in range(len(self.keys)):
+            key = self.keys[self.current_idx]
+            self.current_idx = (self.current_idx + 1) % len(self.keys)
+            if now >= self.cooldowns[key]:
+                return key
+        
+        # Якщо всі ключі на кулдауні, просто беремо наступний
+        key = self.keys[self.current_idx]
+        self.current_idx = (self.current_idx + 1) % len(self.keys)
+        return key
+
+    def mark_exhausted(self, key: str, cooldown_sec: float = 60.0):
+        self.cooldowns[key] = time.time() + cooldown_sec
+
+_key_manager = KeyManager()
+
+def _get_client(api_key: str | None = None) -> genai.Client:
+    return genai.Client(api_key=api_key or _key_manager.get_next_key())
 
 # ── Системний промпт ──────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """Ти — WeatherBot 🌤️, дружній AI-асистент з погоди у Telegram.
@@ -125,36 +148,41 @@ async def _execute_tool(name: str, args: dict, user_id: str) -> str:
     return "Інструмент не знайдено."
 
 # ── Retry-хелпер для Gemini ──────────────────────────────────────────────────
-async def _send_with_retry(chat, payload, max_retries: int = 3):
-    """Надсилає повідомлення в чат з повторними спробами при 503/429."""
+async def _send_with_retry(chat, payload, max_retries: int = 4):
+    """Надсилає повідомлення з ротацією ключів при помилках 429/503."""
     last_exc: Exception | None = None
 
     for attempt in range(1, max_retries + 1):
         try:
-            return await chat.send_message(payload)
-        except genai_errors.ServerError as e:
-            last_exc = e
-            if attempt < max_retries:
-                await asyncio.sleep(2 ** attempt)  # 2, 4 сек
+            response = await chat.send_message(payload)
+            return response, chat
         except Exception as e:
             err = str(e)
-            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+            if "429" in err or "RESOURCE_EXHAUSTED" in err or "503" in err or "UNAVAILABLE" in err:
                 last_exc = e
+                current_key = chat._client.api_key
+                _key_manager.mark_exhausted(current_key)
+                
+                # Створюємо новий чат з новим ключем
+                new_key = _key_manager.get_next_key()
+                new_client = _get_client(new_key)
+                
+                # Переносимо історію
+                history = list(chat.get_history())
+                chat = new_client.aio.chats.create(
+                    model="gemini-3.5-flash",
+                    config=CHAT_CONFIG,
+                    history=history
+                )
+                
                 if attempt < max_retries:
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(1)
             else:
                 raise
 
-    err = str(last_exc)
-    if "503" in err or "UNAVAILABLE" in err:
-        raise RuntimeError(
-            "😴 Ой, схоже ШІ зараз спить...\n"
-            "Я вже кілька разів його будив — не хоче прокидатись 🥱\n"
-            "Спробуй ще раз за хвилинку, він скоро прокинеться!"
-        )
     raise RuntimeError(
-        "⚠️ Gemini API: перевищено ліміт запитів (429).\n"
-        "Зачекай кілька хвилин і спробуй знову, або зверни увагу на квоту ключа."
+        "⚠️ Gemini API: перевищено ліміт запитів на всіх ключах (429/503).\n"
+        "Зачекай несколько минут и попробуй снова."
     )
 
 
@@ -173,7 +201,7 @@ async def process_message(user_id: str, user_text: str) -> str:
         history=history,
     )
 
-    response = await _send_with_retry(chat, user_text)
+    response, chat = await _send_with_retry(chat, user_text)
 
     # Агентний цикл: Gemini може кілька разів викликати tools
     for _ in range(5):
@@ -200,7 +228,7 @@ async def process_message(user_id: str, user_text: str) -> str:
         if not has_tool_call:
             break
 
-        response = await _send_with_retry(chat, tool_responses)
+        response, chat = await _send_with_retry(chat, tool_responses)
 
     try:
         final_text = response.text.strip() if response.text else "Вибач, не вдалось отримати відповідь 😔"

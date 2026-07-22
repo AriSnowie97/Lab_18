@@ -163,6 +163,8 @@ async def _send_with_retry(chat, payload, max_retries: int = 4):
 
     for attempt in range(1, max_retries + 1):
         try:
+            current_key = getattr(chat, "_my_api_key", "UNKNOWN")
+            print(f"[DEBUG] Attempt {attempt}: Using key '{current_key[:10]}...{current_key[-5:]}' (Length: {len(current_key) if current_key else 0})")
             response = await chat.send_message(payload)
             return response, chat
         except Exception as e:

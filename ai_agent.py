@@ -18,15 +18,24 @@ class KeyManager:
         for i in range(1, 11):
             k = os.getenv(f"GEMINI_API_KEY_{i}")
             if k:
-                self.keys.append(k.replace('\n', '').replace('\r', '').replace(' ', '').replace('"', '').replace("'", '').strip())
+                cleaned = k.replace('\n', '').replace('\r', '').replace(' ', '').replace('"', '').replace("'", '').strip()
+                if cleaned:
+                    self.keys.append(cleaned)
                 
         if not self.keys:
             single = os.getenv("GEMINI_API_KEY")
             if single:
-                self.keys.append(single.replace('\n', '').replace('\r', '').replace(' ', '').replace('"', '').replace("'", '').strip())
+                cleaned = single.replace('\n', '').replace('\r', '').replace(' ', '').replace('"', '').replace("'", '').strip()
+                if cleaned:
+                    self.keys.append(cleaned)
                 
         if not self.keys:
             raise ValueError("GEMINI_API_KEY_1... or GEMINI_API_KEY is missing in .env")
+        
+        logging.info(f"[DEBUG] KeyManager initialized with {len(self.keys)} keys.")
+        for idx, k in enumerate(self.keys):
+            logging.info(f"[DEBUG] Key {idx+1}: '{k[:10]}...{k[-5:]}' (Len: {len(k)})")
+            
         self.cooldowns = {k: 0.0 for k in self.keys}
         self.current_idx = 0
 
@@ -164,7 +173,7 @@ async def _send_with_retry(chat, payload, max_retries: int = 4):
     for attempt in range(1, max_retries + 1):
         try:
             current_key = getattr(chat, "_my_api_key", "UNKNOWN")
-            print(f"[DEBUG] Attempt {attempt}: Using key '{current_key[:10]}...{current_key[-5:]}' (Length: {len(current_key) if current_key else 0})")
+            logging.info(f"[DEBUG] Attempt {attempt}: Using key '{current_key[:10]}...{current_key[-5:]}' (Length: {len(current_key) if current_key else 0})")
             response = await chat.send_message(payload)
             return response, chat
         except Exception as e:
@@ -173,7 +182,7 @@ async def _send_with_retry(chat, payload, max_retries: int = 4):
                 last_exc = e
                 current_key = getattr(chat, "_my_api_key", None)
                 if current_key:
-                    print(f"Key {current_key[:10]}... failed with {err[:50]}... Rotating!")
+                    logging.warning(f"[DEBUG] Key {current_key[:10]}... failed with {err[:50]}... Rotating!")
                     _key_manager.mark_exhausted(current_key)
                 
                 # Створюємо новий чат з новим ключем

@@ -1,6 +1,7 @@
 # ai_agent.py
 import asyncio
 import json
+import logging
 import os
 import time
 import redis.asyncio as aioredis

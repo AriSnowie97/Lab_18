@@ -193,7 +193,7 @@ async def _send_with_retry(chat, payload, max_retries: int = 4):
                 # Переносимо історію
                 history = list(chat.get_history())
                 chat = new_client.aio.chats.create(
-                    model="gemini-3.5-flash",
+                    model="gemini-1.5-flash",
                     config=CHAT_CONFIG,
                     history=history
                 )
@@ -221,7 +221,7 @@ async def process_message(user_id: str, user_text: str) -> str:
     history = await _load_history(user_id)
 
     chat = client.aio.chats.create(
-        model="gemini-3.5-flash",
+        model="gemini-1.5-flash",
         config=CHAT_CONFIG,
         history=history,
     )

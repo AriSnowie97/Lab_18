@@ -15,7 +15,7 @@ WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 class KeyManager:
     def __init__(self):
         keys_str = os.getenv("GEMINI_API_KEYS", os.getenv("GEMINI_API_KEY", ""))
-        self.keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+        self.keys = [k.replace('\n', '').replace('\r', '').replace(' ', '').strip() for k in keys_str.split(",") if k.strip()]
         if not self.keys:
             raise ValueError("GEMINI_API_KEYS or GEMINI_API_KEY is missing in .env")
         self.cooldowns = {k: 0.0 for k in self.keys}

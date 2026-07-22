@@ -160,8 +160,9 @@ async def _send_with_retry(chat, payload, max_retries: int = 4):
             err = str(e)
             if "429" in err or "RESOURCE_EXHAUSTED" in err or "503" in err or "UNAVAILABLE" in err:
                 last_exc = e
-                current_key = chat._client.api_key
-                _key_manager.mark_exhausted(current_key)
+                current_key = getattr(chat, "_my_api_key", None)
+                if current_key:
+                    _key_manager.mark_exhausted(current_key)
                 
                 # Створюємо новий чат з новим ключем
                 new_key = _key_manager.get_next_key()
@@ -174,6 +175,7 @@ async def _send_with_retry(chat, payload, max_retries: int = 4):
                     config=CHAT_CONFIG,
                     history=history
                 )
+                chat._my_api_key = new_key
                 
                 if attempt < max_retries:
                     await asyncio.sleep(1)
@@ -192,7 +194,8 @@ async def process_message(user_id: str, user_text: str) -> str:
     Обробляє повідомлення через Gemini з function calling.
     Автоматично вмикає агентний цикл (виклик tools → отримання результату → фінальна відповідь).
     """
-    client = _get_client()
+    current_key = _key_manager.get_next_key()
+    client = _get_client(current_key)
     history = await _load_history(user_id)
 
     chat = client.aio.chats.create(
@@ -200,6 +203,7 @@ async def process_message(user_id: str, user_text: str) -> str:
         config=CHAT_CONFIG,
         history=history,
     )
+    chat._my_api_key = current_key
 
     response, chat = await _send_with_retry(chat, user_text)
 

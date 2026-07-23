@@ -217,56 +217,64 @@ async def process_message(user_id: str, user_text: str) -> str:
     Обробляє повідомлення через Gemini з function calling.
     Автоматично вмикає агентний цикл (виклик tools → отримання результату → фінальна відповідь).
     """
-    current_key = _key_manager.get_next_key()
-    client = _get_client(current_key)
-    history = await _load_history(user_id)
-
-    chat = client.aio.chats.create(
-        model=GEMINI_MODEL,
-        config=CHAT_CONFIG,
-        history=history,
-    )
-    chat._my_api_key = current_key
-
-    response, chat = await _send_with_retry(chat, user_text)
-
-    # Агентний цикл: Gemini може кілька разів викликати tools
-    for _ in range(5):
-        has_tool_call = False
-        tool_responses: list[types.Part] = []
-
-        candidate = response.candidates[0] if response.candidates else None
-        if candidate and candidate.content.parts:
-            for part in candidate.content.parts:
-                if part.function_call:
-                    has_tool_call = True
-                    result = await _execute_tool(
-                        part.function_call.name,
-                        dict(part.function_call.args),
-                        user_id
-                    )
-                    tool_responses.append(
-                        types.Part.from_function_response(
-                            name=part.function_call.name,
-                            response={"result": result}
-                        )
-                    )
-
-        if not has_tool_call:
-            break
-
-        response, chat = await _send_with_retry(chat, tool_responses)
-
     try:
-        final_text = response.text.strip() if response.text else "Вибач, не вдалось отримати відповідь 😔"
-    except Exception:
-        final_text = "Вибач, не вдалось отримати відповідь 😔"
+        current_key = _key_manager.get_next_key()
+        client = _get_client(current_key)
+        history = await _load_history(user_id)
 
-    # Зберігаємо оновлену історію
-    await _save_history(user_id, list(chat.get_history()))
+        chat = client.aio.chats.create(
+            model=GEMINI_MODEL,
+            config=CHAT_CONFIG,
+            history=history,
+        )
+        chat._my_api_key = current_key
 
-    return final_text
+        response, chat = await _send_with_retry(chat, user_text)
 
+        # Агентний цикл: Gemini може кілька разів викликати tools
+        for _ in range(5):
+            has_tool_call = False
+            tool_responses: list[types.Part] = []
+
+            candidate = response.candidates[0] if response.candidates else None
+            if candidate and candidate.content.parts:
+                for part in candidate.content.parts:
+                    if part.function_call:
+                        has_tool_call = True
+                        result = await _execute_tool(
+                            part.function_call.name,
+                            dict(part.function_call.args),
+                            user_id
+                        )
+                        tool_responses.append(
+                            types.Part.from_function_response(
+                                name=part.function_call.name,
+                                response={"result": result}
+                            )
+                        )
+
+            if not has_tool_call:
+                break
+
+            response, chat = await _send_with_retry(chat, tool_responses)
+
+        try:
+            final_text = response.text.strip() if response.text else "Вибач, не вдалось отримати відповідь 😔"
+        except Exception:
+            final_text = "Вибач, не вдалось отримати відповідь 😔"
+
+        # Зберігаємо оновлену історію
+        await _save_history(user_id, list(chat.get_history()))
+
+        return final_text
+    except Exception as e:
+        logging.error(f"Error in process_message: {e}", exc_info=True)
+        return (
+            "😴 Ой, схоже ШІ зараз спить...\n"
+            "Я вже кілька разів його будив — не хоче прокидатись 🥱\n"
+            "Спробуй ще раз за хвилинку, він скоро прокинеться!\n\n"
+            "А якщо це помилка хостингу Railway: звернись до розробника, щоб він глянув хост на помилки або по проєкту)"
+        )
 async def reset_chat(user_id: str):
     """Скидає історію діалогу для користувача."""
     await _clear_history(user_id)
